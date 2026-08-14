@@ -6,11 +6,11 @@ members = [
     "iris-sm87",
     "iris-sm87/kernels",
     "iris-sm87/flash-attn/fa-v1",
+    "docs",
 ]
 exclude = [
     "iris-examples",
     "iris-sm87/flash-attn/fa-v3",
-    "docs",
 ]
 resolver = "2"
 
