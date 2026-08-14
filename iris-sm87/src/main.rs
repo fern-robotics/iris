@@ -1,6 +1,8 @@
 pub mod constants;
 pub mod conversation;
 pub mod image_processor;
+mod runtime;
+mod token_output_stream;
 
 use iris_transformers::generation::{LogitsProcessor, Sampling};
 use iris_transformers::models::llama::Cache;
@@ -11,7 +13,7 @@ use iris_nn::VarBuilder;
 use iris_transformers::models::llava::config::{
     HFGenerationConfig, HFLLaVAConfig, HFPreProcessorConfig,
 };
-use iris_transformers::models::llava::{czonfig::LLaVAConfig, LLaVA};
+use iris_transformers::models::llava::{config::LLaVAConfig, LLaVA};
 use clap::Parser;
 use constants::*;
 use conversation::Conversation;
@@ -148,7 +150,7 @@ fn tokenizer_image_token(
 
 fn main() -> Result<()> {
     let mut args = Args::parse();
-    let device = iris_examples::device(args.cpu)?;
+    let device = runtime::device(args.cpu)?;
     println!("Start loading model");
     let api = Api::new()?;
     let api = api.model(args.model_path.clone());
@@ -201,7 +203,7 @@ fn main() -> Result<()> {
     println!("loading model weights");
 
     let weight_filenames =
-        iris_examples::hub_load_safetensors(&api, "model.safetensors.index.json")?;
+        runtime::hub_load_safetensors(&api, "model.safetensors.index.json")?;
     let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weight_filenames, dtype, &device)? };
     let llava: LLaVA = LLaVA::load(vb, &llava_config, clip_vision_config)?;
 
@@ -281,7 +283,7 @@ fn main() -> Result<()> {
     let mut input_embeds =
         llava.prepare_inputs_labels_for_multimodal(&tokens, &[image_tensor], &[image_size])?;
     //inference loop, based on https://github.com/huggingface/candle/blob/main/iris-examples/examples/llama/main.rs
-    let mut tokenizer = iris_examples::token_output_stream::TokenOutputStream::new(tokenizer);
+    let mut tokenizer = token_output_stream::TokenOutputStream::new(tokenizer);
     let mut index_pos = 0;
     for index in 0..args.max_new_tokens {
         let (_, input_embeds_len, _) = input_embeds.dims3()?;

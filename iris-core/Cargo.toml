@@ -13,9 +13,6 @@ readme = "README.md"
 accelerate-src = { workspace = true, optional = true }
 byteorder = { workspace = true }
 iris-kernels = { workspace = true, optional = true }
-iris-metal-kernels = { workspace = true, optional = true }
-objc2-metal = { workspace = true, optional = true }
-objc2-foundation = { workspace = true, optional = true }
 cudarc = { workspace = true, optional = true }
 gemm = { workspace = true }
 half = { workspace = true, features = ["zerocopy"] }
@@ -37,9 +34,6 @@ zip = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokenizers = { workspace = true, features = ["onig"] }
 
-[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "ios")))'.dependencies]
-iris-ug = { workspace = true, optional = true }
-
 [dev-dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
@@ -47,19 +41,14 @@ criterion = { workspace = true }
 
 [features]
 default = []
-cuda = ["cudarc", "dep:iris-kernels", "iris-ug?/cuda"]
+cuda = ["cudarc", "dep:iris-kernels"]
 cudnn = ["cuda", "cudarc/cudnn"]
 nccl = ["cuda", "cudarc/nccl"]
 mkl = ["dep:intel-mkl-src"]
+# Retained only to make unsupported backend cfgs explicit in this SM87-focused fork.
+metal = []
+ug = []
 accelerate = ["dep:accelerate-src"]
-metal = [
-    "dep:objc2-metal",
-    "dep:objc2-foundation",
-    "dep:iris-metal-kernels",
-    "iris-ug?/metal",
-]
-metal-debug-labels = ["metal", "iris-metal-kernels/debug-labels"]
-ug = ["dep:iris-ug"]
 
 [[bench]]
 name = "bench_main"

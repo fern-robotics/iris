@@ -19,8 +19,6 @@ num-traits = { workspace = true }
 rayon = { workspace = true }
 safetensors = { workspace = true }
 serde = { workspace = true }
-objc2-metal = { workspace = true, optional = true }
-iris-metal-kernels = { workspace = true, optional = true }
 libc = { workspace = true }
 
 [dev-dependencies]
@@ -36,8 +34,8 @@ accelerate = ["dep:accelerate-src", "iris-core/accelerate"]
 cuda = ["iris-core/cuda"]
 cudnn = ["iris-core/cudnn"]
 mkl = ["dep:intel-mkl-src", "iris-core/mkl"]
-metal = ["iris-core/metal", "dep:iris-metal-kernels", "dep:objc2-metal"]
-metal-debug-labels = ["metal", "iris-core/metal-debug-labels"]
+# Unsupported in this SM87-focused fork; retained for cfg compatibility only.
+metal = []
 
 [[bench]]
 name = "bench_main"
