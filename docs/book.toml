@@ -1,0 +1,6 @@
+[book]
+authors = ["Iris contributors"]
+language = "en"
+# multilingual = false
+src = "src"
+title = "Iris Documentation"

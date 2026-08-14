@@ -11,7 +11,7 @@ use iris_nn::VarBuilder;
 use iris_transformers::models::llava::config::{
     HFGenerationConfig, HFLLaVAConfig, HFPreProcessorConfig,
 };
-use iris_transformers::models::llava::{config::LLaVAConfig, LLaVA};
+use iris_transformers::models::llava::{czonfig::LLaVAConfig, LLaVA};
 use clap::Parser;
 use constants::*;
 use conversation::Conversation;
