@@ -1,0 +1,44 @@
+[package]
+name = "iris-nn"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+readme = "README.md"
+
+[dependencies]
+accelerate-src = { workspace = true, optional = true }
+iris-core = { workspace = true }
+half = { workspace = true }
+thiserror = { workspace = true }
+intel-mkl-src = { workspace = true, optional = true }
+num-traits = { workspace = true }
+rayon = { workspace = true }
+safetensors = { workspace = true }
+serde = { workspace = true }
+objc2-metal = { workspace = true, optional = true }
+iris-metal-kernels = { workspace = true, optional = true }
+libc = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
+criterion = { workspace = true }
+
+[features]
+default = []
+accelerate = ["dep:accelerate-src", "iris-core/accelerate"]
+cuda = ["iris-core/cuda"]
+cudnn = ["iris-core/cudnn"]
+mkl = ["dep:intel-mkl-src", "iris-core/mkl"]
+metal = ["iris-core/metal", "dep:iris-metal-kernels", "dep:objc2-metal"]
+metal-debug-labels = ["metal", "iris-core/metal-debug-labels"]
+
+[[bench]]
+name = "bench_main"
+harness = false

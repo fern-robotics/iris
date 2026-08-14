@@ -1,0 +1,27 @@
+[package]
+name = "iris-flash-attn"
+version = "0.11.0"
+edition = "2021"
+
+description = "Flash attention layer for the iris-core ML framework."
+repository = "https://github.com/fern-robotics/iris"
+keywords = ["blas", "tensor", "machine-learning"]
+categories = ["science"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[dependencies]
+iris-core = { path = "../iris-core", features = ["cuda"], package = "iris-core", version = "0.11.0" }
+half = { version = "2.3.1", features = ["num-traits"] }
+
+[build-dependencies]
+cudaforge = "0.1.2"
+anyhow = { version = "1", features = ["backtrace"] }
+
+[dev-dependencies]
+anyhow = { version = "1", features = ["backtrace"] }
+iris-nn = { path = "../iris-nn", features = ["cuda"] }
+
+[features]
+default = []
+cudnn = ["iris-core/cudnn"]
