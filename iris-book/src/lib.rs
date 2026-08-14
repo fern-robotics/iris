@@ -94,7 +94,7 @@ let iterator = view.slice(start..stop).unwrap();
 
 tp_shape[dim] = block_size;
 
-// Convert safetensors Dtype to candle DType
+// Convert safetensors Dtype to iris DType
 let dtype: DType = dtype.try_into().unwrap();
 
 // TODO: Implement from_buffer_iterator so we can skip the extra CPU alloc.

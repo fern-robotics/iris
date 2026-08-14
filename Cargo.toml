@@ -10,9 +10,9 @@ members = [
     "iris-wasm-examples/*",
     "iris-wasm-tests",
     "iris-tensor-tools",
+    "iris-book", "iris-sm87",
 ]
 exclude = [
-    "iris-book",
     "iris-flash-attn",
     "iris-flash-attn-v3",
     "iris-kernels",

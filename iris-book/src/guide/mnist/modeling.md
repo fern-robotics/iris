@@ -1,11 +1,11 @@
-# Candle MNIST Tutorial
+# Iris MNIST Tutorial
 
 ## Modeling
 
 Open `src/main.rs` in your project folder and insert the following code:
 
-```rust
-use candle_core::{Device, Result, Tensor};
+```rust,ignore
+use iris_core::{Device, Result, Tensor};
 
 struct Model {
     first: Tensor,
@@ -52,8 +52,8 @@ To create a more sophisticated layer type, add a `bias` to the weight to constru
 
 Replace the entire content of `src/main.rs` with:
 
-```rust
-use candle_core::{Device, Result, Tensor};
+```rust,ignore
+use iris_core::{Device, Result, Tensor};
 
 struct Linear {
     weight: Tensor,
@@ -111,23 +111,23 @@ $ cargo run --release
 > Digit Tensor[dims 1, 10; f32] digit
 ```
 
-## Utilizing `candle_nn`
+## Utilizing `iris_nn`
 
-Many classical layers (such as [Linear](https://github.com/huggingface/candle/blob/main/candle-nn/src/linear.rs)) are already implemented in [candle-nn](https://github.com/huggingface/candle/tree/main/candle-nn).
+Many classical layers (such as [Linear](https://github.com/fern-robotics/iris/blob/main/iris-nn/src/linear.rs)) are already implemented in [iris-nn](https://github.com/fern-robotics/iris/tree/main/iris-nn).
 
 This `Linear` implementation follows PyTorch conventions for improved compatibility with existing models, utilizing the transpose of weights rather than direct weights.
 
-Let's simplify our implementation. First, add `candle-nn` as a dependency:
+Let's simplify our implementation. First, add `iris-nn` as a dependency:
 
 ```bash
-$ cargo add --git https://github.com/huggingface/candle.git candle-nn
+$ cargo add --git https://github.com/fern-robotics/iris iris-nn
 ```
 
 Now, replace the entire content of `src/main.rs` with:
 
-```rust
-use candle_core::{Device, Result, Tensor};
-use candle_nn::{Linear, Module};
+```rust,ignore
+use iris_core::{Device, Result, Tensor};
+use iris_nn::{Linear, Module};
 
 struct Model {
     first: Linear,

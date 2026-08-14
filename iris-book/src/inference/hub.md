@@ -9,18 +9,18 @@ cargo add hf-hub
 Then let's start by downloading the [model file](https://huggingface.co/bert-base-uncased/tree/main).
 
 
-```rust
-# extern crate candle_core;
+```rust,ignore
+# extern crate iris_core;
 # extern crate hf_hub;
 use hf_hub::api::sync::Api;
-use candle_core::Device;
+use iris_core::Device;
 
 let api = Api::new().unwrap();
 let repo = api.model("bert-base-uncased".to_string());
 
 let weights = repo.get("model.safetensors").unwrap();
 
-let weights = candle_core::safetensors::load(weights, &Device::Cpu);
+let weights = iris_core::safetensors::load(weights, &Device::Cpu);
 ```
 
 We now have access to all the [tensors](https://huggingface.co/bert-base-uncased?show_tensors=true) within the file.
@@ -47,9 +47,9 @@ cargo add hf-hub --features tokio
 
 Now that we have our weights, we can use them in our bert architecture:
 
-```rust
-# extern crate candle_core;
-# extern crate candle_nn;
+```rust,ignore
+# extern crate iris_core;
+# extern crate iris_nn;
 # extern crate hf_hub;
 # use hf_hub::api::sync::Api;
 # 
@@ -57,10 +57,10 @@ Now that we have our weights, we can use them in our bert architecture:
 # let repo = api.model("bert-base-uncased".to_string());
 # 
 # let weights = repo.get("model.safetensors").unwrap();
-use candle_core::{Device, Tensor, DType};
-use candle_nn::{Linear, Module};
+use iris_core::{Device, Tensor, DType};
+use iris_nn::{Linear, Module};
 
-let weights = candle_core::safetensors::load(weights, &Device::Cpu).unwrap();
+let weights = iris_core::safetensors::load(weights, &Device::Cpu).unwrap();
 
 let weight = weights.get("bert.encoder.layer.0.attention.self.query.weight").unwrap();
 let bias = weights.get("bert.encoder.layer.0.attention.self.query.bias").unwrap();
@@ -71,7 +71,7 @@ let input_ids = Tensor::zeros((3, 768), DType::F32, &Device::Cpu).unwrap();
 let output = linear.forward(&input_ids).unwrap();
 ```
 
-For a full reference, you can check out the full [bert](https://github.com/LaurentMazare/candle/tree/main/candle-examples/examples/bert) example.
+For a full reference, you can check out the full [bert](https://github.com/fern-robotics/iris/tree/main/iris-examples/examples/bert) example.
 
 ## Memory mapping
 

@@ -1,16 +1,16 @@
-# Candle MNIST Tutorial
+# Iris MNIST Tutorial
 
 ## Saving and Loading Models
 
-After training a model, it is useful to save and subsequently load the model parameters. In Candle, this functionality is managed through the `VarMap` data structure, with parameters stored on disk using the [safetensors](https://huggingface.co/docs/safetensors/index) format.
+After training a model, it is useful to save and subsequently load the model parameters. In Iris, this functionality is managed through the `VarMap` data structure, with parameters stored on disk using the [safetensors](https://huggingface.co/docs/safetensors/index) format.
 
 ### Saving Model Parameters
 
 Let's modify our `training_loop` function to include functionality for saving weights:
 
-```rust
+```rust,ignore
 fn training_loop(
-    m: candle_datasets::vision::Dataset,
+    m: iris_datasets::vision::Dataset,
 ) -> anyhow::Result<()> {
     let dev = Device::cuda_if_available(0)?;
 
@@ -27,7 +27,7 @@ fn training_loop(
     let epochs = 10;
 
     // Initialize stochastic gradient descent optimizer
-    let mut sgd = candle_nn::SGD::new(varmap.all_vars(), learning_rate)?;
+    let mut sgd = iris_nn::SGD::new(varmap.all_vars(), learning_rate)?;
     let test_images = m.test_images.to_device(&dev)?;
     let test_labels = m.test_labels.to_dtype(DType::U32)?.to_device(&dev)?;
     
@@ -82,9 +82,9 @@ $ cargo run --release
 
 Now that we have saved our model parameters, we can modify the code to load them. The primary change required is to make the `varmap` variable mutable:
 
-```rust
+```rust,ignore
 fn training_loop(
-    m: candle_datasets::vision::Dataset,
+    m: iris_datasets::vision::Dataset,
 ) -> anyhow::Result<()> {
     let dev = Device::cuda_if_available(0)?;
 
@@ -104,7 +104,7 @@ fn training_loop(
     let epochs = 10;
 
     // Initialize stochastic gradient descent optimizer
-    let mut sgd = candle_nn::SGD::new(varmap.all_vars(), learning_rate)?;
+    let mut sgd = iris_nn::SGD::new(varmap.all_vars(), learning_rate)?;
     let test_images = m.test_images.to_device(&dev)?;
     let test_labels = m.test_labels.to_dtype(DType::U32)?.to_device(&dev)?;
     

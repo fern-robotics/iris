@@ -1,24 +1,24 @@
-# Candle MNIST Tutorial
+# Iris MNIST Tutorial
 
 ## Training Implementation
 
 First, let's create a utility function `make_linear` that accepts a `VarBuilder` and returns an initialized linear layer. The `VarBuilder` constructs a `VarMap`, which is the data structure that stores our trainable parameters.
 
-```rust
-use candle_core::{Device, Result, Tensor};
-use candle_nn::{Linear, Module, VarBuilder, VarMap};
+```rust,ignore
+use iris_core::{Device, Result, Tensor};
+use iris_nn::{Linear, Module, VarBuilder, VarMap};
 
 fn make_linear(vs: VarBuilder, in_dim: usize, out_dim: usize) -> Result<Linear> {
     let ws = vs.get_with_hints(
         (out_dim, in_dim),
         "weight",
-        candle_nn::init::DEFAULT_KAIMING_NORMAL,
+        iris_nn::init::DEFAULT_KAIMING_NORMAL,
     )?;
     let bound = 1. / (in_dim as f64).sqrt();
     let bs = vs.get_with_hints(
         out_dim,
         "bias",
-        candle_nn::Init::Uniform {
+        iris_nn::Init::Uniform {
             lo: -bound,
             up: bound,
         },
@@ -29,7 +29,7 @@ fn make_linear(vs: VarBuilder, in_dim: usize, out_dim: usize) -> Result<Linear> 
 
 Next, let's implement a `new` method for our model class to accept a `VarBuilder` and initialize the model. We use `VarBuilder::pp` to "push prefix" so that the parameter names are organized hierarchically: the first layer weights as `first.weight` and `first.bias`, and the second layer weights as `second.weight` and `second.bias`.
 
-```rust
+```rust,ignore
 impl Model {
     fn new(vs: VarBuilder) -> Result<Self> {
         const IMAGE_DIM: usize = 784;
@@ -50,20 +50,20 @@ impl Model {
 }
 ```
 
-Now, let's add the `candle-datasets` package to our project to access the MNIST dataset:
+Now, let's add the `iris-datasets` package to our project to access the MNIST dataset:
 
 ```bash
-$ cargo add --git https://github.com/huggingface/candle.git candle-datasets
+$ cargo add --git https://github.com/fern-robotics/iris iris-datasets
 ```
 
 With the dataset available, we can implement our training loop:
 
-```rust
-use candle_core::{DType, Device, Result, Tensor, D};
-use candle_nn::{loss, ops, Linear, Module, Optimizer, VarBuilder, VarMap};
+```rust,ignore
+use iris_core::{DType, Device, Result, Tensor, D};
+use iris_nn::{loss, ops, Linear, Module, Optimizer, VarBuilder, VarMap};
 
 fn training_loop(
-    m: candle_datasets::vision::Dataset,
+    m: iris_datasets::vision::Dataset,
 ) -> anyhow::Result<()> {
     let dev = Device::cuda_if_available(0)?;
 
@@ -80,7 +80,7 @@ fn training_loop(
     let epochs = 10;
 
     // Initialize a stochastic gradient descent optimizer to update parameters
-    let mut sgd = candle_nn::SGD::new(varmap.all_vars(), learning_rate)?;
+    let mut sgd = iris_nn::SGD::new(varmap.all_vars(), learning_rate)?;
     let test_images = m.test_images.to_device(&dev)?;
     let test_labels = m.test_labels.to_dtype(DType::U32)?.to_device(&dev)?;
     
@@ -116,9 +116,9 @@ fn training_loop(
 
 Finally, let's implement our main function:
 
-```rust
+```rust,ignore
 pub fn main() -> anyhow::Result<()> {
-    let m = candle_datasets::vision::mnist::load()?;
+    let m = iris_datasets::vision::mnist::load()?;
     return training_loop(m);
 }
 ```

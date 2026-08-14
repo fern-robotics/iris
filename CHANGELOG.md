@@ -1,5 +1,5 @@
 # Changelog
-This documents the main changes to the `candle` crate.
+This documents the main changes to the `iris` crate.
 
 ## v0.3.1 - Unreleased
 

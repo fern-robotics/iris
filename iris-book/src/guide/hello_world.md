@@ -4,9 +4,9 @@ We will now create the hello world of the ML world, building a model capable of 
 
 Open `src/main.rs` and fill in this content:
 
-```rust
-# extern crate candle_core;
-use candle_core::{Device, Result, Tensor};
+```rust,ignore
+# extern crate iris_core;
+use iris_core::{Device, Result, Tensor};
 
 struct Model {
     first: Tensor,
@@ -48,9 +48,9 @@ cargo run --release
 Now that we have this, we might want to complexify things a bit, for instance by adding `bias` and creating
 the classical `Linear` layer. We can do as such
 
-```rust
-# extern crate candle_core;
-# use candle_core::{Device, Result, Tensor};
+```rust,ignore
+# extern crate iris_core;
+# use iris_core::{Device, Result, Tensor};
 struct Linear{
     weight: Tensor,
     bias: Tensor,
@@ -78,9 +78,9 @@ impl Model {
 
 This will change the model running code into a new function
 
-```rust
-# extern crate candle_core;
-# use candle_core::{Device, Result, Tensor};
+```rust,ignore
+# extern crate iris_core;
+# use iris_core::{Device, Result, Tensor};
 # struct Linear{
 #     weight: Tensor,
 #     bias: Tensor,
@@ -128,26 +128,26 @@ fn main() -> Result<()> {
 ```
 
 Now it works, it is a great way to create your own layers.
-But most of the classical layers are already implemented in [candle-nn](https://github.com/huggingface/candle/tree/main/candle-nn).
+But most of the classical layers are already implemented in [iris-nn](https://github.com/fern-robotics/iris/tree/main/iris-nn).
 
-## Using `candle_nn`.
+## Using `iris_nn`.
 
-For instance [Linear](https://github.com/huggingface/candle/blob/main/candle-nn/src/linear.rs) is already there.
+For instance [Linear](https://github.com/fern-robotics/iris/blob/main/iris-nn/src/linear.rs) is already there.
 This Linear is coded with PyTorch layout in mind, to reuse better existing models out there, so it uses the transpose of the weights and not the weights directly.
 
 So instead we can simplify our example:
 
 ```bash
-cargo add --git https://github.com/huggingface/candle.git candle-nn
+cargo add --git https://github.com/fern-robotics/iris iris-nn
 ```
 
 And rewrite our examples using it
 
-```rust
-# extern crate candle_core;
-# extern crate candle_nn;
-use candle_core::{Device, Result, Tensor};
-use candle_nn::{Linear, Module};
+```rust,ignore
+# extern crate iris_core;
+# extern crate iris_nn;
+use iris_core::{Device, Result, Tensor};
+use iris_nn::{Linear, Module};
 
 struct Model {
     first: Linear,

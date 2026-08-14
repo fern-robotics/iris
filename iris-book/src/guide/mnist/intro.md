@@ -1,8 +1,8 @@
-# Candle MNIST Tutorial
+# Iris MNIST Tutorial
 
 ## Introduction
 
-This tutorial provides an introduction to Candle by implementing and training a neural network for MNIST digit classification from scratch. 
+This tutorial provides an introduction to Iris by implementing and training a neural network for MNIST digit classification from scratch.
 
 Throughout this tutorial, you will learn the basics of:
 
@@ -14,4 +14,4 @@ Throughout this tutorial, you will learn the basics of:
 
 ## Getting Started
 
-Before proceeding, please ensure that you have properly installed Candle by following the instructions in the [Installation](../installation.md) guide.
+Before proceeding, please ensure that you have properly installed Iris by following the instructions in the [Installation](../installation.md) guide.

@@ -6,6 +6,8 @@
 
 **Iris: A Low-Latency Rust/CUDA Runtime for Vision-Language Model Inference.**
 
-## Foundation
-
 Iris is built on top of [Candle](https://github.com/huggingface/candle).
+
+Environment: Jetson Orin NX 16 GB (SM87)
+
+Author: ![Ryan Adidaru](https://github.com/coolcmyk)

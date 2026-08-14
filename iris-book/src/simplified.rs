@@ -1,4 +1,4 @@
-//! #A simplified example in Rust of training a neural network and then using it based on the Candle Framework by Hugging Face.
+//! #A simplified example in Rust of training a neural network and then using it based on the Iris Framework by Hugging Face.
 //! Author: Evgeny Igumnov 2023 igumnovnsk@gmail.com
 //! This program implements a neural network to predict the winner of the second round of elections based on the results of the first round.
 //!

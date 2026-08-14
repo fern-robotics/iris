@@ -7,12 +7,12 @@ cargo new myapp
 cd myapp
 ```
 
-## 2. Add the correct candle version
+## 2. Add the correct iris version
 
 ### Standard
 
 ```bash
-cargo add --git https://github.com/huggingface/candle.git candle-core
+cargo add --git https://github.com/fern-robotics/iris iris-core
 ```
 
 ### CUDA
@@ -32,30 +32,30 @@ You can also compile the Cuda kernels for a specific compute cap using the
 
 If any of the above commands errors out, please make sure to update your Cuda version.
 
-Add the `candle-core` crate with the cuda feature:
+Add the `iris-core` crate with the cuda feature:
 
 ```bash
-cargo add --git https://github.com/huggingface/candle.git candle-core --features "cuda"
+cargo add --git https://github.com/fern-robotics/iris iris-core --features "cuda"
 ```
 
 ### MKL
 
 You can also see the `mkl` feature which can get faster inference on CPU.
 
-Add the `candle-core` crate with the mkl feature:
+Add the `iris-core` crate with the mkl feature:
 
 ```bash
-cargo add --git https://github.com/huggingface/candle.git candle-core --features "mkl"
+cargo add --git https://github.com/fern-robotics/iris iris-core --features "mkl"
 ```
 
 ### Metal
 
 Metal is exclusive to MacOS.
 
-Add the `candle-core` crate with the metal feature:
+Add the `iris-core` crate with the metal feature:
 
 ```bash
-cargo add --git https://github.com/huggingface/candle.git candle-core --features "metal"
+cargo add --git https://github.com/fern-robotics/iris iris-core --features "metal"
 ```
 
 ## 3. Building
