@@ -1,10 +1,7 @@
-pub mod audio;
-pub mod bs1770;
-pub mod chat_template;
-pub mod coco_classes;
-pub mod imagenet;
+// The focused workspace currently keeps only the shared inference helpers used
+// by the supported runnable baselines. Other historical example modules remain
+// in this directory but are not compiled into this crate.
 pub mod token_output_stream;
-pub mod wav;
 use iris_core::utils::{cuda_is_available, metal_is_available};
 use iris_core::{Device, Result, Tensor};
 

@@ -35,9 +35,9 @@ impl Module for RmsNorm {
         let x = x.to_dtype(internal_dtype)?;
         let norm_x = (x.sqr()?.sum_keepdim(D::Minus1)? / hidden_size as f64)?;
         let x_normed = x.broadcast_div(&(norm_x + self.eps)?.sqrt()?)?;
-        x_normed
-            .to_dtype(x_dtype)?
-            .broadcast_mul(&(&self.weight + 1.0)?)
+        // Gemma4 checkpoint RMSNorm weights are direct scales. Unlike older
+        // Gemma variants, they must not receive an additional +1 offset.
+        x_normed.to_dtype(x_dtype)?.broadcast_mul(&self.weight)
     }
 }
 
@@ -48,6 +48,22 @@ fn v_norm(v: &Tensor, eps: f64) -> Result<Tensor> {
     let mean_sq = v_f32.sqr()?.mean_keepdim(D::Minus1)?;
     let rms = (mean_sq + eps)?.sqrt()?;
     v_f32.broadcast_div(&rms)?.to_dtype(original_dtype)
+}
+
+// Gemma4 uses the Llama-style half-split rotation:
+// [-x[d/2:], x[:d/2]], not Iris's generic interleaved RoPE helper.
+fn apply_gemma4_rope(q: &Tensor, k: &Tensor, cos: &Tensor, sin: &Tensor) -> Result<(Tensor, Tensor)> {
+    let cos = Tensor::cat(&[cos, cos], D::Minus1)?.unsqueeze(0)?.unsqueeze(0)?;
+    let sin = Tensor::cat(&[sin, sin], D::Minus1)?.unsqueeze(0)?.unsqueeze(0)?;
+    let rotate_half = |x: &Tensor| -> Result<Tensor> {
+        let dim = x.dim(D::Minus1)?;
+        let x1 = x.narrow(D::Minus1, 0, dim / 2)?;
+        let x2 = x.narrow(D::Minus1, dim / 2, dim - dim / 2)?;
+        Tensor::cat(&[&x2.neg()?, &x1], D::Minus1)
+    };
+    let q_embed = (q.broadcast_mul(&cos)? + rotate_half(q)?.broadcast_mul(&sin)?)?;
+    let k_embed = (k.broadcast_mul(&cos)? + rotate_half(k)?.broadcast_mul(&sin)?)?;
+    Ok((q_embed, k_embed))
 }
 
 // ── RotaryEmbedding (standard, for sliding layers) ──────────────────────────
@@ -91,9 +107,7 @@ impl RotaryEmbedding {
         let (_b_sz, _h, seq_len, _n_embd) = q.dims4()?;
         let cos = self.cos.narrow(0, seqlen_offset, seq_len)?;
         let sin = self.sin.narrow(0, seqlen_offset, seq_len)?;
-        let q_embed = iris_nn::rotary_emb::rope(&q.contiguous()?, &cos, &sin)?;
-        let k_embed = iris_nn::rotary_emb::rope(&k.contiguous()?, &cos, &sin)?;
-        Ok((q_embed, k_embed))
+        apply_gemma4_rope(q, k, &cos, &sin)
     }
 }
 
@@ -144,9 +158,7 @@ impl ProportionalRotaryEmbedding {
         let (_b_sz, _h, seq_len, _n_embd) = q.dims4()?;
         let cos = self.cos.narrow(0, seqlen_offset, seq_len)?;
         let sin = self.sin.narrow(0, seqlen_offset, seq_len)?;
-        let q_embed = iris_nn::rotary_emb::rope(&q.contiguous()?, &cos, &sin)?;
-        let k_embed = iris_nn::rotary_emb::rope(&k.contiguous()?, &cos, &sin)?;
-        Ok((q_embed, k_embed))
+        apply_gemma4_rope(q, k, &cos, &sin)
     }
 }
 
@@ -217,20 +229,24 @@ enum KvCache {
 
 // ── Attention ───────────────────────────────────────────────────────────────
 
+type SharedKv = (Tensor, Tensor);
+
 #[derive(Debug, Clone)]
 struct Attention {
     q_proj: Linear,
-    k_proj: Linear,
-    v_proj: Linear,
+    k_proj: Option<Linear>,
+    v_proj: Option<Linear>,
     o_proj: Linear,
     q_norm: RmsNorm,
-    k_norm: RmsNorm,
+    k_norm: Option<RmsNorm>,
     num_heads: usize,
     num_kv_heads: usize,
     num_kv_groups: usize,
     head_dim: usize,
     rms_norm_eps: f64,
     is_sliding: bool,
+    is_kv_shared_layer: bool,
+    store_full_length_kv: bool,
     rotary_emb_global: Arc<ProportionalRotaryEmbedding>,
     rotary_emb_local: Arc<RotaryEmbedding>,
     kv_cache: KvCache,
@@ -261,12 +277,25 @@ impl Attention {
         };
 
         let num_kv_groups = num_heads / num_kv_heads;
+        let first_kv_shared_layer = cfg.num_hidden_layers.saturating_sub(cfg.num_kv_shared_layers);
+        let is_kv_shared_layer = layer_idx >= first_kv_shared_layer && cfg.num_kv_shared_layers > 0;
+        let store_full_length_kv = !is_kv_shared_layer
+            && cfg.layer_types[..first_kv_shared_layer]
+                .iter()
+                .rposition(|layer_type| layer_type == &cfg.layer_types[layer_idx])
+                == Some(layer_idx);
         let q_proj = linear_bias(hidden_sz, num_heads * head_dim, bias, vb.pp("q_proj"))?;
-        let k_proj = linear_bias(hidden_sz, num_kv_heads * head_dim, bias, vb.pp("k_proj"))?;
-        let v_proj = linear_bias(hidden_sz, num_kv_heads * head_dim, bias, vb.pp("v_proj"))?;
+        let (k_proj, v_proj, k_norm) = if is_kv_shared_layer {
+            (None, None, None)
+        } else {
+            (
+                Some(linear_bias(hidden_sz, num_kv_heads * head_dim, bias, vb.pp("k_proj"))?),
+                Some(linear_bias(hidden_sz, num_kv_heads * head_dim, bias, vb.pp("v_proj"))?),
+                Some(RmsNorm::new(head_dim, cfg.rms_norm_eps, vb.pp("k_norm"))?),
+            )
+        };
         let o_proj = linear_bias(num_heads * head_dim, hidden_sz, bias, vb.pp("o_proj"))?;
         let q_norm = RmsNorm::new(head_dim, cfg.rms_norm_eps, vb.pp("q_norm"))?;
-        let k_norm = RmsNorm::new(head_dim, cfg.rms_norm_eps, vb.pp("k_norm"))?;
 
         let kv_cache = if is_sliding {
             KvCache::Rotating(iris_nn::kv_cache::RotatingKvCache::new(
@@ -293,6 +322,8 @@ impl Attention {
             head_dim,
             rms_norm_eps: cfg.rms_norm_eps,
             is_sliding,
+            is_kv_shared_layer,
+            store_full_length_kv,
             rotary_emb_global,
             rotary_emb_local,
             kv_cache,
@@ -303,46 +334,55 @@ impl Attention {
     fn forward(
         &mut self,
         xs: &Tensor,
+        shared_kv: Option<&SharedKv>,
         attention_mask: Option<&Tensor>,
         sliding_attention_mask: Option<&Tensor>,
         seqlen_offset: usize,
-    ) -> Result<Tensor> {
+    ) -> Result<(Tensor, Option<SharedKv>)> {
         let (b_sz, q_len, _) = xs.dims3()?;
 
-        let mut q = self.q_proj.forward(xs)?;
-        let mut k = self.k_proj.forward(xs)?;
-        let v = self.v_proj.forward(xs)?;
+        let q = self
+            .q_norm
+            .forward(&self.q_proj.forward(xs)?.reshape((b_sz, q_len, self.num_heads, self.head_dim))?.transpose(1, 2)?)?;
 
-        q = q
-            .reshape((b_sz, q_len, self.num_heads, self.head_dim))?
-            .transpose(1, 2)?;
-        k = k
-            .reshape((b_sz, q_len, self.num_kv_heads, self.head_dim))?
-            .transpose(1, 2)?;
-        let v = v
-            .reshape((b_sz, q_len, self.num_kv_heads, self.head_dim))?
-            .transpose(1, 2)?;
-
-        // Q/K norms
-        q = self.q_norm.forward(&q)?;
-        k = self.k_norm.forward(&k)?;
-        // V norm (RMS without learned weight)
-        let v = v_norm(&v, self.rms_norm_eps)?;
-
-        // Apply RoPE
-        let (q, k) = if self.is_sliding {
-            self.rotary_emb_local
-                .apply_rotary_emb_qkv(&q, &k, seqlen_offset)?
+        let (k, v, stored_shared_kv) = if self.is_kv_shared_layer {
+            let (k, v) = shared_kv.ok_or_else(|| {
+                iris_core::Error::msg("Gemma4 shared-KV layer ran before its source K/V state")
+            })?;
+            (k.clone(), v.clone(), None)
         } else {
-            self.rotary_emb_global
-                .apply_rotary_emb_qkv(&q, &k, seqlen_offset)?
+            let k_proj = self.k_proj.as_ref().expect("non-shared layer has K projection");
+            let v_proj = self.v_proj.as_ref().expect("non-shared layer has V projection");
+            let k_norm = self.k_norm.as_ref().expect("non-shared layer has K norm");
+            let k = k_proj
+                .forward(xs)?
+                .reshape((b_sz, q_len, self.num_kv_heads, self.head_dim))?
+                .transpose(1, 2)?;
+            let v = v_proj
+                .forward(xs)?
+                .reshape((b_sz, q_len, self.num_kv_heads, self.head_dim))?
+                .transpose(1, 2)?;
+            let k = k_norm.forward(&k)?;
+            let v = v_norm(&v, self.rms_norm_eps)?;
+            let (_, k) = if self.is_sliding {
+                // Query is already rotated below; only rotate this newly computed K.
+                self.rotary_emb_local.apply_rotary_emb_qkv(&q, &k, seqlen_offset)?
+            } else {
+                self.rotary_emb_global.apply_rotary_emb_qkv(&q, &k, seqlen_offset)?
+            };
+            let (k, v) = match &mut self.kv_cache {
+                KvCache::Normal(cache) => cache.append(&k, &v)?,
+                KvCache::Rotating(cache) => cache.append(&k, &v)?,
+            };
+            let stored = self.store_full_length_kv.then(|| (k.clone(), v.clone()));
+            (k, v, stored)
         };
 
-        let (k, v) = match &mut self.kv_cache {
-            KvCache::Normal(cache) => cache.append(&k, &v)?,
-            KvCache::Rotating(cache) => cache.append(&k, &v)?,
+        let q = if self.is_sliding {
+            self.rotary_emb_local.apply_rotary_emb_qkv(&q, &q, seqlen_offset)?.0
+        } else {
+            self.rotary_emb_global.apply_rotary_emb_qkv(&q, &q, seqlen_offset)?.0
         };
-
         let k = crate::utils::repeat_kv(k, self.num_kv_groups)?.contiguous()?;
         let v = crate::utils::repeat_kv(v, self.num_kv_groups)?.contiguous()?;
 
@@ -356,11 +396,11 @@ impl Attention {
             let q = q.transpose(1, 2)?;
             let k = k.transpose(1, 2)?;
             let v = v.transpose(1, 2)?;
-            let scale = 1f32 / (self.head_dim as f32).sqrt();
-            flash_attn(&q, &k, &v, scale, mask.is_some())?.transpose(1, 2)?
+            flash_attn(&q, &k, &v, 1.0, mask.is_some())?.transpose(1, 2)?
         } else {
-            let scale = 1f64 / f64::sqrt(self.head_dim as f64);
-            let attn_weights = (q.matmul(&k.transpose(2, 3)?)? * scale)?;
+            // Gemma4 normalizes Q and K explicitly, so eager attention uses
+            // unit scaling rather than the conventional 1/sqrt(head_dim).
+            let attn_weights = q.matmul(&k.transpose(2, 3)?)?;
 
             let attn_weights = match mask {
                 None => attn_weights,
@@ -369,10 +409,11 @@ impl Attention {
             let attn_weights = iris_nn::ops::softmax_last_dim(&attn_weights)?;
             attn_weights.matmul(&v)?
         };
-        attn_output
+        let output = attn_output
             .transpose(1, 2)?
             .reshape((b_sz, q_len, ()))?
-            .apply(&self.o_proj)
+            .apply(&self.o_proj)?;
+        Ok((output, stored_shared_kv))
     }
 
     fn clear_kv_cache(&mut self) {
@@ -393,6 +434,13 @@ struct DecoderLayer {
     post_attention_layernorm: RmsNorm,
     pre_feedforward_layernorm: RmsNorm,
     post_feedforward_layernorm: RmsNorm,
+    // Gemma4's per-layer embeddings add a token- and context-dependent
+    // residual after the MLP block.
+    per_layer_input_gate: Option<Linear>,
+    per_layer_projection: Option<Linear>,
+    post_per_layer_input_norm: Option<RmsNorm>,
+    per_layer_activation: Option<Activation>,
+    layer_scalar: Tensor,
     #[allow(dead_code)]
     is_sliding: bool,
 }
@@ -437,6 +485,31 @@ impl DecoderLayer {
             cfg.rms_norm_eps,
             vb.pp("post_feedforward_layernorm"),
         )?;
+        let (per_layer_input_gate, per_layer_projection, post_per_layer_input_norm, per_layer_activation) =
+            if cfg.hidden_size_per_layer_input > 0 {
+                let ple_dim = cfg.hidden_size_per_layer_input;
+                (
+                    Some(iris_nn::linear_no_bias(
+                        cfg.hidden_size,
+                        ple_dim,
+                        vb.pp("per_layer_input_gate"),
+                    )?),
+                    Some(iris_nn::linear_no_bias(
+                        ple_dim,
+                        cfg.hidden_size,
+                        vb.pp("per_layer_projection"),
+                    )?),
+                    Some(RmsNorm::new(
+                        cfg.hidden_size,
+                        cfg.rms_norm_eps,
+                        vb.pp("post_per_layer_input_norm"),
+                    )?),
+                    Some(cfg.hidden_activation),
+                )
+            } else {
+                (None, None, None, None)
+            };
+        let layer_scalar = vb.get(1, "layer_scalar")?;
         Ok(Self {
             self_attn,
             mlp,
@@ -444,6 +517,11 @@ impl DecoderLayer {
             post_attention_layernorm,
             pre_feedforward_layernorm,
             post_feedforward_layernorm,
+            per_layer_input_gate,
+            per_layer_projection,
+            post_per_layer_input_norm,
+            per_layer_activation,
+            layer_scalar,
             is_sliding,
         })
     }
@@ -451,22 +529,46 @@ impl DecoderLayer {
     fn forward(
         &mut self,
         xs: &Tensor,
+        per_layer_input: Option<&Tensor>,
+        shared_kv: Option<&SharedKv>,
         attention_mask: Option<&Tensor>,
         sliding_attention_mask: Option<&Tensor>,
         seqlen_offset: usize,
-    ) -> Result<Tensor> {
+    ) -> Result<(Tensor, Option<SharedKv>)> {
         let residual = xs;
         let xs = self.input_layernorm.forward(xs)?;
-        let xs =
-            self.self_attn
-                .forward(&xs, attention_mask, sliding_attention_mask, seqlen_offset)?;
+        let (xs, stored_shared_kv) = self.self_attn.forward(
+            &xs,
+            shared_kv,
+            attention_mask,
+            sliding_attention_mask,
+            seqlen_offset,
+        )?;
         let xs = xs.apply(&self.post_attention_layernorm)?;
         let xs = (xs + residual)?;
         let residual = &xs;
         let xs = xs.apply(&self.pre_feedforward_layernorm)?;
         let xs = xs.apply(&self.mlp)?;
         let xs = xs.apply(&self.post_feedforward_layernorm)?;
-        residual + xs
+        let xs = (residual + xs)?;
+
+        let xs = match (
+            &self.per_layer_input_gate,
+            &self.per_layer_projection,
+            &self.post_per_layer_input_norm,
+            &self.per_layer_activation,
+            per_layer_input,
+        ) {
+            (Some(gate), Some(projection), Some(norm), Some(activation), Some(per_layer_input)) => {
+                let residual = &xs;
+                let ple = gate.forward(&xs)?.apply(activation)?;
+                let ple = (ple * per_layer_input)?;
+                let ple = projection.forward(&ple)?.apply(norm)?;
+                (residual + ple)?
+            }
+            _ => xs,
+        };
+        Ok((xs.broadcast_mul(&self.layer_scalar)?, stored_shared_kv))
     }
 
     fn clear_kv_cache(&mut self) {
@@ -517,6 +619,12 @@ fn prepare_decoder_attention_mask(
 #[derive(Debug, Clone)]
 pub struct TextModel {
     embed_tokens: iris_nn::Embedding,
+    // Packed [vocab, num_layers * per_layer_dim] auxiliary embedding table.
+    per_layer_embed_tokens: Option<iris_nn::Embedding>,
+    per_layer_model_projection: Option<Linear>,
+    per_layer_projection_norm: Option<RmsNorm>,
+    per_layer_input_dim: usize,
+    layer_is_sliding: Vec<bool>,
     layers: Vec<DecoderLayer>,
     norm: RmsNorm,
     lm_head: Linear,
@@ -529,12 +637,38 @@ pub struct TextModel {
 
 impl TextModel {
     pub fn new(cfg: &Gemma4TextConfig, vb: VarBuilder) -> Result<Self> {
-        let vb_m = vb.pp("model");
+        // `vb` is the language-model root. Callers pass either
+        // `model.language_model` (full multimodal checkpoint) or an equivalent
+        // text-only root, so do not add another `model` path component here.
+        let vb_m = vb;
         let embed_tokens =
             iris_nn::embedding(cfg.vocab_size, cfg.hidden_size, vb_m.pp("embed_tokens"))?;
+        let (per_layer_embed_tokens, per_layer_model_projection, per_layer_projection_norm) =
+            if cfg.hidden_size_per_layer_input > 0 {
+                let packed_dim = cfg.num_hidden_layers * cfg.hidden_size_per_layer_input;
+                (
+                    Some(iris_nn::embedding(
+                        cfg.vocab_size_per_layer_input,
+                        packed_dim,
+                        vb_m.pp("embed_tokens_per_layer"),
+                    )?),
+                    Some(iris_nn::linear_no_bias(
+                        cfg.hidden_size,
+                        packed_dim,
+                        vb_m.pp("per_layer_model_projection"),
+                    )?),
+                    Some(RmsNorm::new(
+                        cfg.hidden_size_per_layer_input,
+                        cfg.rms_norm_eps,
+                        vb_m.pp("per_layer_projection_norm"),
+                    )?),
+                )
+            } else {
+                (None, None, None)
+            };
 
         let rotary_emb_global = Arc::new(ProportionalRotaryEmbedding::new(
-            vb.dtype(),
+            vb_m.dtype(),
             cfg.global_head_dim,
             cfg.rope_theta,
             cfg.partial_rotary_factor(),
@@ -542,7 +676,7 @@ impl TextModel {
             vb_m.device(),
         )?);
         let rotary_emb_local = Arc::new(RotaryEmbedding::new(
-            vb.dtype(),
+            vb_m.dtype(),
             cfg.head_dim,
             cfg.rope_local_base_freq(),
             cfg.max_position_embeddings,
@@ -565,16 +699,21 @@ impl TextModel {
         let lm_head = if cfg.tie_word_embeddings {
             Linear::new(embed_tokens.embeddings().clone(), None)
         } else {
-            iris_nn::linear_no_bias(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?
+            iris_nn::linear_no_bias(cfg.hidden_size, cfg.vocab_size, vb_m.pp("lm_head"))?
         };
         Ok(Self {
             embed_tokens,
+            per_layer_embed_tokens,
+            per_layer_model_projection,
+            per_layer_projection_norm,
+            per_layer_input_dim: cfg.hidden_size_per_layer_input,
+            layer_is_sliding: (0..cfg.num_hidden_layers).map(|idx| cfg.is_sliding(idx)).collect(),
             layers,
             norm,
             lm_head,
             final_logit_softcapping: cfg.final_logit_softcapping,
-            device: vb.device().clone(),
-            dtype: vb.dtype(),
+            device: vb_m.device().clone(),
+            dtype: vb_m.dtype(),
             hidden_size: cfg.hidden_size,
             sliding_window: cfg.sliding_window,
         })
@@ -613,10 +752,52 @@ impl TextModel {
         xs * (self.hidden_size as f64).sqrt()
     }
 
+    fn token_per_layer_inputs(&self, input_ids: &Tensor) -> Result<Option<Tensor>> {
+        let Some(embedding) = &self.per_layer_embed_tokens else {
+            return Ok(None);
+        };
+        let (batch_size, seq_len) = input_ids.dims2()?;
+        let inputs = (embedding.forward(input_ids)? * (self.per_layer_input_dim as f64).sqrt())?;
+        inputs.reshape((batch_size, seq_len, self.layers.len(), self.per_layer_input_dim)).map(Some)
+    }
+
+    fn project_per_layer_inputs(
+        &self,
+        input_embeds: &Tensor,
+        token_inputs: Option<&Tensor>,
+    ) -> Result<Option<Tensor>> {
+        let (Some(projection), Some(norm)) = (
+            &self.per_layer_model_projection,
+            &self.per_layer_projection_norm,
+        ) else {
+            return Ok(None);
+        };
+        let (batch_size, seq_len, _) = input_embeds.dims3()?;
+        let projected = (projection.forward(input_embeds)? * (self.hidden_size as f64).sqrt().recip())?;
+        let projected = projected.reshape((
+            batch_size,
+            seq_len,
+            self.layers.len(),
+            self.per_layer_input_dim,
+        ))?;
+        let projected = norm.forward(&projected)?;
+        match token_inputs {
+            Some(token_inputs) => ((projected + token_inputs)? * 2f64.sqrt().recip()).map(Some),
+            None => Ok(Some(projected)),
+        }
+    }
+
     pub fn forward(&mut self, input_ids: &Tensor, seqlen_offset: usize) -> Result<Tensor> {
-        let (b_size, seq_len) = input_ids.dims2()?;
+        let (batch_size, seq_len) = input_ids.dims2()?;
         let xs = self.embed_tokens(input_ids)?;
-        self.forward_embeds(&xs, seqlen_offset, b_size, seq_len)
+        let token_inputs = self.token_per_layer_inputs(input_ids)?;
+        self.forward_embeds_with_per_layer_inputs(
+            &xs,
+            token_inputs.as_ref(),
+            seqlen_offset,
+            batch_size,
+            seq_len,
+        )
     }
 
     pub fn forward_embeds(
@@ -626,17 +807,52 @@ impl TextModel {
         batch_size: usize,
         seq_len: usize,
     ) -> Result<Tensor> {
+        // Multimodal callers supply modified embeddings. They have no exact token
+        // identity for media positions, so use the context projection component.
+        self.forward_embeds_with_per_layer_inputs(xs, None, seqlen_offset, batch_size, seq_len)
+    }
+
+    fn forward_embeds_with_per_layer_inputs(
+        &mut self,
+        xs: &Tensor,
+        token_inputs: Option<&Tensor>,
+        seqlen_offset: usize,
+        batch_size: usize,
+        seq_len: usize,
+    ) -> Result<Tensor> {
         let (attention_mask, sliding_attention_mask) =
             self.create_attention_masks(batch_size, seq_len, seqlen_offset)?;
+        let per_layer_inputs = self.project_per_layer_inputs(xs, token_inputs)?;
 
         let mut xs = xs.clone();
-        for layer in self.layers.iter_mut() {
-            xs = layer.forward(
+        let mut shared_sliding_kv: Option<SharedKv> = None;
+        let mut shared_full_kv: Option<SharedKv> = None;
+        for (layer_idx, layer) in self.layers.iter_mut().enumerate() {
+            let per_layer_input = match &per_layer_inputs {
+                Some(inputs) => Some(inputs.narrow(2, layer_idx, 1)?.squeeze(2)?),
+                None => None,
+            };
+            let shared_kv = if self.layer_is_sliding[layer_idx] {
+                shared_sliding_kv.as_ref()
+            } else {
+                shared_full_kv.as_ref()
+            };
+            let (next_xs, stored_shared_kv) = layer.forward(
                 &xs,
+                per_layer_input.as_ref(),
+                shared_kv,
                 attention_mask.as_ref(),
                 sliding_attention_mask.as_ref(),
                 seqlen_offset,
-            )?
+            )?;
+            xs = next_xs;
+            if let Some(shared_kv) = stored_shared_kv {
+                if self.layer_is_sliding[layer_idx] {
+                    shared_sliding_kv = Some(shared_kv);
+                } else {
+                    shared_full_kv = Some(shared_kv);
+                }
+            }
         }
         let logits = xs
             .narrow(1, seq_len - 1, 1)?

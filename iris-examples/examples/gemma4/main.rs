@@ -1,9 +1,3 @@
-#[cfg(feature = "mkl")]
-extern crate intel_mkl_src;
-
-#[cfg(feature = "accelerate")]
-extern crate accelerate_src;
-
 use anyhow::{Error as E, Result};
 use clap::Parser;
 
@@ -33,6 +27,7 @@ struct TextGeneration {
     logits_processor: LogitsProcessor,
     repeat_penalty: f32,
     repeat_last_n: usize,
+    debug_first_logits: bool,
 }
 
 impl TextGeneration {
@@ -46,6 +41,7 @@ impl TextGeneration {
         top_k: Option<usize>,
         repeat_penalty: f32,
         repeat_last_n: usize,
+        debug_first_logits: bool,
         device: &Device,
     ) -> Self {
         let logits_processor = {
@@ -69,6 +65,7 @@ impl TextGeneration {
             logits_processor,
             repeat_penalty,
             repeat_last_n,
+            debug_first_logits,
             device: device.clone(),
         }
     }
@@ -83,12 +80,11 @@ impl TextGeneration {
             .map_err(E::msg)?
             .get_ids()
             .to_vec();
+        // Prime the streaming tokenizer with the prompt, but only print newly
+        // generated text rather than echoing chat-control tokens to the user.
         for &t in tokens.iter() {
-            if let Some(t) = self.tokenizer.next_token(t)? {
-                print!("{t}")
-            }
+            let _ = self.tokenizer.next_token(t)?;
         }
-        std::io::stdout().flush()?;
 
         let mut generated_tokens = 0usize;
         let eos_token = match self.tokenizer.get_token("</s>") {
@@ -117,6 +113,15 @@ impl TextGeneration {
                 )?
             };
 
+            if index == 0 && self.debug_first_logits {
+                let mut ranked: Vec<_> = logits
+                    .to_vec1::<f32>()?
+                    .into_iter()
+                    .enumerate()
+                    .collect();
+                ranked.sort_unstable_by(|a, b| b.1.total_cmp(&a.1));
+                eprintln!("first-token top-10 token IDs: {:?}", &ranked[..10]);
+            }
             let next_token = self.logits_processor.sample(&logits)?;
             tokens.push(next_token);
             generated_tokens += 1;
@@ -157,6 +162,10 @@ struct Args {
 
     #[arg(long)]
     prompt: String,
+
+    /// Send the prompt unchanged instead of wrapping it in Gemma4's chat template.
+    #[arg(long)]
+    raw_prompt: bool,
 
     /// The temperature used to generate samples.
     #[arg(long)]
@@ -208,6 +217,10 @@ struct Args {
     /// Use the slower dmmv cuda kernel.
     #[arg(long)]
     force_dmmv: bool,
+
+    /// Print the first next-token logits as `(token_id, score)` pairs.
+    #[arg(long)]
+    debug_first_logits: bool,
 }
 
 fn main() -> Result<()> {
@@ -303,11 +316,22 @@ fn main() -> Result<()> {
             }
         };
         config.use_flash_attn = args.use_flash_attn;
-        let model = TextModel::new(&config, vb)?;
+        // Google Gemma4 checkpoints store text weights under
+        // `model.language_model` even for text-only generation.
+        let model = TextModel::new(&config, vb.pp("model").pp("language_model"))?;
         ModelKind::TextOnly(model)
     };
 
     println!("loaded the model in {:?}", start.elapsed());
+
+    let prompt = if args.raw_prompt {
+        args.prompt.clone()
+    } else {
+        format!(
+            "<start_of_turn>user\n{}<end_of_turn>\n<start_of_turn>model\n",
+            args.prompt
+        )
+    };
 
     let mut pipeline = TextGeneration::new(
         model,
@@ -318,8 +342,9 @@ fn main() -> Result<()> {
         args.top_k,
         args.repeat_penalty,
         args.repeat_last_n,
+        args.debug_first_logits,
         &device,
     );
-    pipeline.run(&args.prompt, args.sample_len)?;
+    pipeline.run(&prompt, args.sample_len)?;
     Ok(())
 }

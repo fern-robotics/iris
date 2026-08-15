@@ -17,7 +17,8 @@ fn default_num_attention_heads() -> usize {
     8
 }
 fn default_num_key_value_heads() -> usize {
-    4
+    // Gemma4 E4B uses 2 KV heads for both sliding and full attention.
+    2
 }
 fn default_rms_norm_eps() -> f64 {
     1e-6
@@ -46,6 +47,24 @@ fn default_global_head_dim() -> usize {
 fn default_use_flash_attn() -> bool {
     false
 }
+fn default_bos_token_id() -> usize {
+    2
+}
+fn default_eos_token_id() -> usize {
+    1
+}
+fn default_pad_token_id() -> usize {
+    0
+}
+fn default_hidden_size_per_layer_input() -> usize {
+    256
+}
+fn default_num_kv_shared_layers() -> usize {
+    18
+}
+fn default_vocab_size_per_layer_input() -> usize {
+    262_144
+}
 
 // ── Rope parameters ─────────────────────────────────────────────────────────
 
@@ -71,23 +90,43 @@ pub struct Gemma4RopeParameters {
 pub struct Gemma4TextConfig {
     #[serde(default = "default_attention_bias")]
     pub attention_bias: bool,
+    #[serde(default)]
+    pub attention_dropout: f64,
+    #[serde(default)]
+    pub attention_k_eq_v: bool,
     #[serde(default = "default_head_dim")]
     pub head_dim: usize,
     #[serde(default = "default_hidden_activation")]
     pub hidden_activation: Activation,
     pub hidden_size: usize,
+    #[serde(default = "default_hidden_size_per_layer_input")]
+    pub hidden_size_per_layer_input: usize,
     pub intermediate_size: usize,
+    #[serde(default)]
+    pub enable_moe_block: bool,
+    pub expert_intermediate_size: Option<usize>,
     #[serde(default = "default_num_attention_heads")]
     pub num_attention_heads: usize,
     pub num_hidden_layers: usize,
+    pub num_experts: Option<usize>,
     #[serde(default = "default_num_key_value_heads")]
     pub num_key_value_heads: usize,
+    #[serde(default = "default_num_kv_shared_layers")]
+    pub num_kv_shared_layers: usize,
     #[serde(default = "default_rms_norm_eps")]
     pub rms_norm_eps: f64,
     #[serde(default = "default_rope_theta")]
     pub rope_theta: f64,
     #[serde(default = "default_vocab_size")]
     pub vocab_size: usize,
+    #[serde(default = "default_vocab_size_per_layer_input")]
+    pub vocab_size_per_layer_input: usize,
+    #[serde(default = "default_pad_token_id")]
+    pub pad_token_id: usize,
+    #[serde(default = "default_bos_token_id")]
+    pub bos_token_id: usize,
+    #[serde(default = "default_eos_token_id")]
+    pub eos_token_id: usize,
     pub sliding_window: usize,
     pub final_logit_softcapping: Option<f64>,
     #[serde(default = "default_query_pre_attn_scalar")]
@@ -106,7 +145,12 @@ pub struct Gemma4TextConfig {
     pub global_head_dim: usize,
     pub num_global_key_value_heads: Option<usize>,
     pub rope_parameters: Option<Gemma4RopeParameters>,
+    pub top_k_experts: Option<usize>,
     pub use_bidirectional_attention: Option<String>,
+    #[serde(default = "default_tie_word_embeddings")]
+    pub use_cache: bool,
+    #[serde(default)]
+    pub use_double_wide_mlp: bool,
     #[serde(default = "default_use_flash_attn")]
     pub use_flash_attn: bool,
 }
