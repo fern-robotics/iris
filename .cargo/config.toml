@@ -1,6 +1,12 @@
 [build]
 rustflags = ["-C", "target-cpu=native"]
 
+# cudaforge derives CUDA include paths from NVCC.  On the CUDA container image,
+# /usr/local/bin/nvcc is a wrapper/symlink whose parent is not the toolkit.
+# Point it at the toolkit binary so CUDA headers resolve during kernel builds.
+[env]
+NVCC = { value = "/usr/local/cuda/bin/nvcc", force = false }
+
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "target-feature=+simd128", "--cfg", 'getrandom_backend="wasm_js"']
 
